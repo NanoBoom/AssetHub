@@ -181,6 +181,85 @@ open http://localhost:8003/swagger/index.html
 
 Full API documentation: `http://localhost:8003/swagger/index.html`
 
+## Upload & Download Workflows
+
+### 1. Presigned Upload (Frontend Direct Upload)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant AssetHub
+    participant S3/OSS
+
+    Client->>AssetHub: POST /files/upload/presigned/init<br/>{name, content_type, size}
+    AssetHub->>AssetHub: Create file record (status=pending)
+    AssetHub->>S3/OSS: Generate presigned PUT URL
+    S3/OSS-->>AssetHub: Presigned URL (expires in 1h)
+    AssetHub-->>Client: {file_id, upload_url, storage_key}
+
+    Client->>S3/OSS: PUT file to presigned URL<br/>(direct upload, no proxy)
+    S3/OSS-->>Client: 200 OK
+
+    Client->>AssetHub: POST /files/upload/presigned/confirm<br/>{file_id}
+    AssetHub->>AssetHub: Update file status to completed
+    AssetHub-->>Client: {file_id, status=completed}
+```
+
+**Use Case**: Small to medium files (< 100MB), reduces backend bandwidth.
+
+### 2. Multipart Upload (Large Files)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant AssetHub
+    participant S3/OSS
+
+    Client->>AssetHub: POST /files/upload/multipart/init<br/>{name, content_type, size}
+    AssetHub->>AssetHub: Create file record (status=uploading)
+    AssetHub->>S3/OSS: Initiate multipart upload
+    S3/OSS-->>AssetHub: upload_id
+    AssetHub-->>Client: {file_id, upload_id, storage_key}
+
+    loop For each part (1 to N)
+        Client->>AssetHub: POST /files/upload/multipart/part-url<br/>{file_id, part_number}
+        AssetHub->>S3/OSS: Generate presigned URL for part
+        S3/OSS-->>AssetHub: Presigned URL
+        AssetHub-->>Client: {part_number, upload_url}
+
+        Client->>S3/OSS: PUT part to presigned URL
+        S3/OSS-->>Client: 200 OK + ETag
+    end
+
+    Client->>AssetHub: POST /files/upload/multipart/complete<br/>{file_id, parts: [{part_number, etag}]}
+    AssetHub->>S3/OSS: Complete multipart upload
+    S3/OSS-->>AssetHub: 200 OK
+    AssetHub->>AssetHub: Update file status to completed
+    AssetHub-->>Client: {file_id, status=completed}
+```
+
+**Use Case**: Large files (>= 100MB), supports resume, parallel upload.
+
+### 3. Presigned Download
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant AssetHub
+    participant S3/OSS
+
+    Client->>AssetHub: GET /files/:id/download-url
+    AssetHub->>AssetHub: Query file metadata
+    AssetHub->>S3/OSS: Generate presigned GET URL
+    S3/OSS-->>AssetHub: Presigned URL (expires in 15min)
+    AssetHub-->>Client: {file_id, download_url, expires_in}
+
+    Client->>S3/OSS: GET file from presigned URL<br/>(direct download, no proxy)
+    S3/OSS-->>Client: File content
+```
+
+**Use Case**: Secure file access with expiration, reduces backend bandwidth.
+
 ## Development
 
 ### Makefile Commands

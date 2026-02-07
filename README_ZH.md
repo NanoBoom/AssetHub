@@ -181,6 +181,85 @@ open http://localhost:8003/swagger/index.html
 
 完整 API 文档：`http://localhost:8003/swagger/index.html`
 
+## 上传下载流程
+
+### 1. 预签名上传（前端直传）
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant AssetHub as AssetHub 后端
+    participant S3/OSS as S3/OSS 存储
+
+    Client->>AssetHub: POST /files/upload/presigned/init<br/>{name, content_type, size}
+    AssetHub->>AssetHub: 创建文件记录 (status=pending)
+    AssetHub->>S3/OSS: 生成预签名 PUT URL
+    S3/OSS-->>AssetHub: 预签名 URL (1小时有效)
+    AssetHub-->>Client: {file_id, upload_url, storage_key}
+
+    Client->>S3/OSS: PUT 文件到预签名 URL<br/>（直传，不经过后端）
+    S3/OSS-->>Client: 200 OK
+
+    Client->>AssetHub: POST /files/upload/presigned/confirm<br/>{file_id}
+    AssetHub->>AssetHub: 更新文件状态为 completed
+    AssetHub-->>Client: {file_id, status=completed}
+```
+
+**适用场景**：中小文件（< 100MB），减少后端带宽消耗。
+
+### 2. 分片上传（大文件）
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant AssetHub as AssetHub 后端
+    participant S3/OSS as S3/OSS 存储
+
+    Client->>AssetHub: POST /files/upload/multipart/init<br/>{name, content_type, size}
+    AssetHub->>AssetHub: 创建文件记录 (status=uploading)
+    AssetHub->>S3/OSS: 初始化分片上传
+    S3/OSS-->>AssetHub: upload_id
+    AssetHub-->>Client: {file_id, upload_id, storage_key}
+
+    loop 对每个分片 (1 到 N)
+        Client->>AssetHub: POST /files/upload/multipart/part-url<br/>{file_id, part_number}
+        AssetHub->>S3/OSS: 生成分片预签名 URL
+        S3/OSS-->>AssetHub: 预签名 URL
+        AssetHub-->>Client: {part_number, upload_url}
+
+        Client->>S3/OSS: PUT 分片到预签名 URL
+        S3/OSS-->>Client: 200 OK + ETag
+    end
+
+    Client->>AssetHub: POST /files/upload/multipart/complete<br/>{file_id, parts: [{part_number, etag}]}
+    AssetHub->>S3/OSS: 完成分片上传
+    S3/OSS-->>AssetHub: 200 OK
+    AssetHub->>AssetHub: 更新文件状态为 completed
+    AssetHub-->>Client: {file_id, status=completed}
+```
+
+**适用场景**：大文件（>= 100MB），支持断点续传、并行上传。
+
+### 3. 预签名下载
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant AssetHub as AssetHub 后端
+    participant S3/OSS as S3/OSS 存储
+
+    Client->>AssetHub: GET /files/:id/download-url
+    AssetHub->>AssetHub: 查询文件元数据
+    AssetHub->>S3/OSS: 生成预签名 GET URL
+    S3/OSS-->>AssetHub: 预签名 URL (15分钟有效)
+    AssetHub-->>Client: {file_id, download_url, expires_in}
+
+    Client->>S3/OSS: GET 文件从预签名 URL<br/>（直接下载，不经过后端）
+    S3/OSS-->>Client: 文件内容
+```
+
+**适用场景**：安全的文件访问控制，带过期时间，减少后端带宽消耗。
+
 ## 开发指南
 
 ### Makefile 命令
