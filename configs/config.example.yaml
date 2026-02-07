@@ -1,0 +1,45 @@
+# AssetHub Configuration Example
+# Copy this file to config.yaml and modify as needed
+
+app:
+  name: "AssetHub"           # Application name
+  port: 8080                 # HTTP server port
+  env: "development"         # Environment: development, production
+
+database:
+  host: "localhost"          # PostgreSQL host
+  port: 5432                 # PostgreSQL port
+  user: "postgres"           # Database user
+  password: "postgres"       # Database password
+  dbname: "assethub"         # Database name
+  sslmode: "disable"         # SSL mode: disable, require, verify-ca, verify-full
+  max_open_conns: 10         # Maximum open connections
+  max_idle_conns: 5          # Maximum idle connections
+
+redis:
+  host: "localhost"          # Redis host
+  port: 6379                 # Redis port
+  password: ""               # Redis password (empty if none)
+  db: 2                      # Redis database number
+  pool_size: 10              # Connection pool size
+
+log:
+  level: "debug"             # Log level: debug, info, warn, error
+  format: "console"          # Log format: console, json
+
+storage:
+  type: "s3"                          # Storage type: s3, oss, local
+  s3:
+    region: "us-east-1"               # AWS region
+    bucket: "assethub-files"          # S3 bucket name
+    access_key_id: ""                 # AWS Access Key ID (empty to use IAM role)
+    secret_access_key: ""             # AWS Secret Access Key (empty to use IAM role)
+    endpoint: ""                      # Custom endpoint (for MinIO or S3-compatible services)
+    use_path_style: false             # Use path-style addressing (set to true for MinIO)
+  oss:
+    endpoint: "oss-cn-hangzhou.aliyuncs.com"  # OSS endpoint (根据区域选择)
+    bucket: "assethub-files"                  # OSS bucket name
+    access_key_id: ""                         # Aliyun Access Key ID
+    access_key_secret: ""                     # Aliyun Access Key Secret
+  local:
+    base_path: "./storage"            # Local storage base directory

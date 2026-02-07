@@ -1,0 +1,63 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+TODO/
+
+# Go specific
+vendor/
+go.work
+go.work.sum
+
+# Build outputs
+/cmd/api/api
+/cmd/*/main
+
+# Coverage
+coverage.txt
+coverage.html
+coverage.out
+
+# Air live reload
+tmp/
+
+# Swagger (auto-generated)
+docs/swagger.json
+docs/swagger.yaml
+docs/docs.go
+
+# Project specific
+uploads/
+*.db
+config.yaml
