@@ -1,0 +1,42 @@
+app:
+  name: "AssetHub"
+  port: 8080
+  env: "development"
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  dbname: "assethub"
+  sslmode: "disable"
+  max_open_conns: 10
+  max_idle_conns: 5
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 2
+  pool_size: 10
+
+log:
+  level: "debug"
+  format: "console"
+
+storage:
+  type: "oss"                          # 存储类型: s3, oss, local
+  s3:
+    region: "us-east-1"                # AWS region
+    bucket: "your-bucket-name"         # S3 bucket name
+    access_key_id: ""                  # AWS Access Key ID (empty to use IAM role)
+    secret_access_key: ""              # AWS Secret Access Key (empty to use IAM role)
+    endpoint: ""                       # Custom endpoint (for MinIO or S3-compatible services)
+    use_path_style: false              # Use path-style addressing (set to true for MinIO)
+  oss:
+    endpoint: "oss-cn-hangzhou.aliyuncs.com"  # OSS endpoint (根据区域选择)
+    bucket: "your-bucket-name"         # OSS bucket name
+    access_key_id: ""                  # Aliyun Access Key ID
+    access_key_secret: ""              # Aliyun Access Key Secret
+  local:
+    base_path: "./storage"             # 本地存储根目录

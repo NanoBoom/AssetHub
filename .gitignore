@@ -60,4 +60,3 @@ docs/docs.go
 # Project specific
 uploads/
 *.db
-config.yaml
