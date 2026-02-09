@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/NanoBoom/asethub/internal/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -13,7 +14,7 @@ type FileRepository interface {
 	Create(ctx context.Context, file *models.File) error
 
 	// GetByID 根据 ID 查询文件
-	GetByID(ctx context.Context, id uint) (*models.File, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*models.File, error)
 
 	// GetByStorageKey 根据存储键查询文件
 	GetByStorageKey(ctx context.Context, storageKey string) (*models.File, error)
@@ -22,10 +23,10 @@ type FileRepository interface {
 	Update(ctx context.Context, file *models.File) error
 
 	// UpdateStatus 更新文件状态
-	UpdateStatus(ctx context.Context, id uint, status models.FileStatus) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status models.FileStatus) error
 
 	// Delete 删除文件记录（软删除）
-	Delete(ctx context.Context, id uint) error
+	Delete(ctx context.Context, id uuid.UUID) error
 
 	// List 分页查询文件列表
 	List(ctx context.Context, offset, limit int) ([]*models.File, int64, error)
@@ -49,9 +50,9 @@ func (r *fileRepository) Create(ctx context.Context, file *models.File) error {
 }
 
 // GetByID 根据 ID 查询文件
-func (r *fileRepository) GetByID(ctx context.Context, id uint) (*models.File, error) {
+func (r *fileRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.File, error) {
 	var file models.File
-	err := r.db.WithContext(ctx).First(&file, id).Error
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&file).Error
 	if err != nil {
 		return nil, err
 	}
@@ -74,13 +75,13 @@ func (r *fileRepository) Update(ctx context.Context, file *models.File) error {
 }
 
 // UpdateStatus 更新文件状态
-func (r *fileRepository) UpdateStatus(ctx context.Context, id uint, status models.FileStatus) error {
+func (r *fileRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status models.FileStatus) error {
 	return r.db.WithContext(ctx).Model(&models.File{}).Where("id = ?", id).Update("status", status).Error
 }
 
 // Delete 删除文件记录（软删除）
-func (r *fileRepository) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&models.File{}, id).Error
+func (r *fileRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&models.File{}).Error
 }
 
 // List 分页查询文件列表

@@ -40,7 +40,7 @@ func NewMockStorage() *MockStorage {
 	}
 }
 
-func (m *MockStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64) error {
+func (m *MockStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return err
@@ -53,7 +53,7 @@ func (m *MockStorage) GeneratePresignedUploadURL(ctx context.Context, key string
 	return fmt.Sprintf("https://mock-s3.example.com/upload/%s", key), nil
 }
 
-func (m *MockStorage) InitMultipartUpload(ctx context.Context, key string) (*storage.MultipartUpload, error) {
+func (m *MockStorage) InitMultipartUpload(ctx context.Context, key string, contentType string) (*storage.MultipartUpload, error) {
 	return &storage.MultipartUpload{
 		UploadID: "mock-upload-id-" + key,
 		Key:      key,
@@ -71,7 +71,7 @@ func (m *MockStorage) CompleteMultipartUpload(ctx context.Context, key string, u
 	return nil
 }
 
-func (m *MockStorage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+func (m *MockStorage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration, opts *storage.PresignOptions) (string, error) {
 	return fmt.Sprintf("https://mock-s3.example.com/download/%s", key), nil
 }
 
