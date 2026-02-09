@@ -20,6 +20,8 @@ bin/
 
 # Environment
 .env
+.env.docker
+.env.local
 *.local
 
 # OS

@@ -20,52 +20,19 @@ Enterprise-grade file storage microservice with unified API for multiple storage
 |-----------|-----------|
 | Web Framework | Gin v1.11.0 |
 | ORM | GORM v1.31.1 |
-| Database | PostgreSQL 14+ |
-| Cache | Redis 6+ (go-redis v9) |
+| Database | PostgreSQL 18+ (Docker: postgres:18-alpine) |
+| Cache | Redis 7+ (go-redis v9) |
 | Storage | AWS S3 SDK v2 / Aliyun OSS SDK |
 | Config | Viper v1.21.0 |
 | Logger | Zap |
 | Docs | Swagger (swaggo) |
 
-## Architecture
+## Requirements
 
-```
-AssetHub/
-├── cmd/api/main.go              # Application entry
-├── internal/
-│   ├── config/                  # Config loading (Viper)
-│   ├── database/                # PostgreSQL connection
-│   ├── cache/                   # Redis client
-│   ├── handlers/                # HTTP handlers
-│   │   ├── health.go            # Health check
-│   │   └── file_handler.go      # File operations
-│   ├── services/                # Business logic
-│   │   └── file_service.go      # File service
-│   ├── repositories/            # Data access layer
-│   │   └── file_repository.go   # File repository
-│   ├── models/                  # Data models
-│   │   ├── base.go              # Base model (ID, timestamps)
-│   │   └── file.go              # File model
-│   ├── middleware/              # Middleware
-│   │   ├── cors.go              # CORS
-│   │   ├── error.go             # Error handler
-│   │   ├── logger.go            # Request logger
-│   │   └── recovery.go          # Panic recovery
-│   ├── errors/                  # Custom errors
-│   └── logger/                  # Logger initialization
-├── pkg/
-│   ├── response/                # Unified response format
-│   └── storage/                 # Storage abstraction
-│       ├── interface.go         # Storage interface
-│       ├── s3.go                # S3 implementation
-│       ├── oss.go               # Aliyun OSS implementation
-│       └── local.go             # Local filesystem
-├── configs/
-│   └── config.yaml              # Default config (no secrets)
-├── .env.example                 # Environment variables template
-├── Makefile                     # Build commands
-└── go.mod
-```
+- Go 1.25+
+- PostgreSQL 18+ (or 14+ for older versions)
+- Redis 6+
+- AWS S3 / Aliyun OSS / MinIO (external cluster)
 
 ## Requirements
 
@@ -74,7 +41,197 @@ AssetHub/
 - Redis 6+
 - AWS S3 / Aliyun OSS / MinIO (optional, can use local storage)
 
-## Quick Start
+## Quick Start with Docker (Recommended)
+
+The fastest way to start AssetHub is using Docker Compose, which includes all dependencies:
+
+### 1. Start All Services
+
+```bash
+# Start PostgreSQL, Redis, MinIO, and AssetHub
+docker-compose up -d
+
+# View logs
+docker-compose logs -f api
+```
+
+This will start:
+- **PostgreSQL 18** at `localhost:5432` (latest stable version)
+- **Redis 7** at `localhost:6379`
+- **AssetHub API** at `localhost:8080`
+
+**Note**: Storage backend (AWS S3 or external MinIO) must be configured separately.
+
+### 2. Verify Services
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Swagger UI
+open http://localhost:8080/swagger/index.html
+```
+
+### ⚠️ PostgreSQL 18 重要变更
+
+**Docker 卷挂载路径已更改**：
+
+PostgreSQL 18 的 Docker 镜像改变了数据目录结构：
+- **旧路径（17 及更早）**: `/var/lib/postgresql/data`
+- **新路径（18+）**: `/var/lib/postgresql`
+
+**原因**：PostgreSQL 18 内部使用版本特定的 PGDATA 路径（`/var/lib/postgresql/18/docker`），而 `data` 目录现在是符号链接。
+
+**影响**：如果继续使用旧路径会导致容器启动失败。docker-compose.yaml 已正确配置为 `/var/lib/postgresql`。
+
+详情参考：[Upgrading to PostgreSQL 18 in Docker](https://medepros.ca/blog/upgrading-to-postgresql-18-in-docker-a-crucial-change-you-need-to-be-aware-of/)
+
+### 3. Configure Storage Backend
+
+Before starting services, configure your S3 storage:
+
+**Option A: AWS S3 (Recommended for production)**
+
+```bash
+# Create .env.docker file
+cp .env.docker.example .env.docker
+
+# Edit with your AWS credentials
+vim .env.docker
+```
+
+```bash
+# .env.docker
+S3_REGION=ap-southeast-1
+S3_BUCKET=your-production-bucket
+S3_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+S3_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+S3_ENDPOINT=  # Leave empty for AWS S3
+S3_USE_PATH_STYLE=false
+```
+
+**Option B: External MinIO Cluster (Development)**
+
+```bash
+# .env.docker
+S3_REGION=us-east-1
+S3_BUCKET=assethub-files
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
+S3_ENDPOINT=http://localhost:9000  # Your MinIO endpoint
+S3_USE_PATH_STYLE=true
+```
+
+### 4. Start Services
+
+```bash
+# Start with custom environment
+docker-compose --env-file .env.docker up -d
+
+# Or use default (requires S3 credentials configured)
+docker-compose up -d
+```
+
+### 5. Verify Services
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Swagger UI
+open http://localhost:8080/swagger/index.html
+```
+
+### 6. Stop Services
+
+```bash
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes (⚠️ deletes all data)
+docker-compose down -v
+```
+
+### ⚠️ Security Warning
+
+**This configuration is for development only!**
+
+The docker-compose.yaml uses hardcoded default credentials:
+- PostgreSQL: `postgres/postgres`
+
+**For production deployment:**
+1. Use environment variable files (`.env.docker`) to manage S3 credentials
+2. Change PostgreSQL default password
+3. Use Docker secrets or Kubernetes secrets for sensitive data
+4. Restrict port bindings to `127.0.0.1` where possible
+5. Enable SSL/TLS for database connections (`DB_SSLMODE=require`)
+6. Use strong AWS IAM policies instead of access keys when possible
+7. Rotate S3 access keys regularly
+
+Example production environment:
+```bash
+# .env.production
+POSTGRES_PASSWORD=your_strong_random_password_here
+S3_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+S3_SECRET_ACCESS_KEY=your_strong_random_secret_key
+DB_SSLMODE=require
+APP_ENV=production
+LOG_LEVEL=info
+```
+
+### Docker Compose Services
+
+| Service | Description | Ports |
+|---------|-------------|-------|
+| `api` | AssetHub application | 8080 |
+| `postgres` | PostgreSQL database | 5432 |
+| `redis` | Redis cache | 6379 |
+
+**Note**: Storage backend (S3/OSS) must be configured externally via environment variables.
+
+### Customization
+
+Copy `.env.docker.example` to `.env.docker` and modify:
+
+```bash
+cp .env.docker.example .env.docker
+# Edit .env.docker with your settings
+docker-compose --env-file .env.docker up -d
+```
+
+**Key Environment Variables**:
+
+- `STORAGE_TYPE`: Storage backend (`s3`, `oss`, `local`)
+- `S3_REGION`: AWS S3 region (e.g., `us-east-1`, `ap-southeast-1`)
+- `S3_BUCKET`: S3 bucket name
+- `S3_ACCESS_KEY_ID`: AWS access key ID
+- `S3_SECRET_ACCESS_KEY`: AWS secret access key
+- `S3_ENDPOINT`: S3 endpoint (leave empty for AWS S3, set to MinIO URL for local cluster)
+- `S3_USE_PATH_STYLE`: Set to `true` for MinIO, `false` for AWS S3
+- `LOG_LEVEL`: Log level (`debug`, `info`, `warn`, `error`)
+
+### Production Deployment
+
+For production, use the Dockerfile with your orchestration platform:
+
+```bash
+# Build image
+docker build -t assethub:latest .
+
+# Run with external database/storage
+docker run -d \
+  --name assethub \
+  -p 8080:8080 \
+  -e DB_HOST=your-postgres-host \
+  -e REDIS_HOST=your-redis-host \
+  -e STORAGE_TYPE=s3 \
+  -e S3_BUCKET=your-production-bucket \
+  assethub:latest
+```
+
+See [Configuration](#configuration) for all environment variables.
+
+## Quick Start (Local Development)
 
 ### 1. Clone Repository
 

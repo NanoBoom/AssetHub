@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yaml
+.dockerignore
+
+# 文档
+README.md
+CLAUDE.md
+docs
+
+# 环境变量文件
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# 临时文件
+*.log
+*.tmp
+*.swp
+*.swo
+
+# IDE
+.vscode
+.idea
+*.iml
+
+# 构建产物
+bin/
+tmp/
+dist/
+
+# 测试
+*_test.go
+test/
+coverage/
+
+# 数据库脚本（已在 Docker Compose 中挂载）
+scripts/
+
+# Makefile
+Makefile

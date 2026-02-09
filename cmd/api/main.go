@@ -24,6 +24,7 @@ import (
 	"github.com/NanoBoom/asethub/internal/handlers"
 	"github.com/NanoBoom/asethub/internal/logger"
 	"github.com/NanoBoom/asethub/internal/middleware"
+	"github.com/NanoBoom/asethub/internal/models"
 	"github.com/NanoBoom/asethub/internal/repositories"
 	"github.com/NanoBoom/asethub/internal/services"
 	"github.com/NanoBoom/asethub/pkg/storage"
@@ -57,12 +58,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to init logger: %v", err)
 	}
-	defer zapLogger.Sync()
 
 	db, err := database.New(&cfg.Database)
 	if err != nil {
 		zapLogger.Fatal("Failed to connect to database", zap.Error(err))
 	}
+
+	// 自动迁移数据库表结构
+	if err := db.AutoMigrate(&models.File{}); err != nil {
+		zapLogger.Fatal("Failed to migrate database", zap.Error(err))
+	}
+	zapLogger.Info("Database migration completed")
 
 	redisClient, err := cache.New(&cfg.Redis)
 	if err != nil {

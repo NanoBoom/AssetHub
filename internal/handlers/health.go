@@ -36,7 +36,7 @@ func NewHealthHandler(db *gorm.DB, redis *cache.RedisClient) *HealthHandler {
 // @Success      200  {object}  HealthResponse
 // @Router       /health [get]
 func (h *HealthHandler) Check(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
 	defer cancel()
 
 	dbStatus := "ok"
