@@ -104,8 +104,8 @@ vim .env.docker
 # .env.docker
 S3_REGION=ap-southeast-1
 S3_BUCKET=your-production-bucket
-S3_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
-S3_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+S3_ACCESS_KEY_ID=your-access-key-id
+S3_SECRET_ACCESS_KEY=your-secret-access-key
 S3_ENDPOINT=  # Leave empty for AWS S3
 S3_USE_PATH_STYLE=false
 ```
@@ -116,8 +116,8 @@ S3_USE_PATH_STYLE=false
 # .env.docker
 S3_REGION=us-east-1
 S3_BUCKET=assethub-files
-S3_ACCESS_KEY_ID=minioadmin
-S3_SECRET_ACCESS_KEY=minioadmin
+S3_ACCESS_KEY_ID=your-minio-access-key
+S3_SECRET_ACCESS_KEY=your-minio-secret-key
 S3_ENDPOINT=http://localhost:9000  # Your MinIO endpoint
 S3_USE_PATH_STYLE=true
 ```
@@ -172,8 +172,8 @@ Example production environment:
 ```bash
 # .env.production
 POSTGRES_PASSWORD=your_strong_random_password_here
-S3_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
-S3_SECRET_ACCESS_KEY=your_strong_random_secret_key
+S3_ACCESS_KEY_ID=your-access-key-id
+S3_SECRET_ACCESS_KEY=your-secret-access-key
 DB_SSLMODE=require
 APP_ENV=production
 LOG_LEVEL=info
