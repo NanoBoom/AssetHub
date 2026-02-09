@@ -22,6 +22,13 @@ type CompletedPart struct {
 	ETag       string // S3 返回的 ETag
 }
 
+// PresignOptions 预签名 URL 选项
+// 用于设置下载 URL 的响应头，控制浏览器行为（预览 vs 下载）
+type PresignOptions struct {
+	ContentType        string // 响应 Content-Type（如 "image/png"）
+	ContentDisposition string // 响应 Content-Disposition（"inline" 预览 / "attachment" 下载）
+}
+
 // Storage 统一存储接口
 // 抽象云存储后端（S3/OSS/本地存储），提供文件上传、下载、预签名 URL 生成等核心能力
 type Storage interface {
@@ -34,8 +41,9 @@ type Storage interface {
 	//   - key: 对象键（存储路径）
 	//   - reader: 文件内容流
 	//   - size: 文件大小（字节）
+	//   - contentType: 文件 MIME 类型（如 "image/png"）
 	// 返回：错误信息
-	Upload(ctx context.Context, key string, reader io.Reader, size int64) error
+	Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 
 	// GeneratePresignedUploadURL 生成小文件上传预签名 URL（前端直传）
 	// 适用场景：前端直接上传到 S3，避免后端代理
@@ -43,8 +51,9 @@ type Storage interface {
 	//   - ctx: 上下文
 	//   - key: 对象键（存储路径）
 	//   - expiry: URL 过期时间（建议 1 小时）
+	//   - contentType: 文件 MIME 类型（必须与实际上传时一致，否则签名验证失败）
 	// 返回：预签名 URL、错误信息
-	GeneratePresignedUploadURL(ctx context.Context, key string, expiry time.Duration) (string, error)
+	GeneratePresignedUploadURL(ctx context.Context, key string, expiry time.Duration, contentType string) (string, error)
 
 	// === 大文件分片上传（>= 100MB）===
 
@@ -53,8 +62,9 @@ type Storage interface {
 	// 参数：
 	//   - ctx: 上下文
 	//   - key: 对象键（存储路径）
+	//   - contentType: 文件 MIME 类型（如 "video/mp4"）
 	// 返回：分片上传信息（包含 upload ID 和预签名 URL 列表）、错误信息
-	InitMultipartUpload(ctx context.Context, key string) (*MultipartUpload, error)
+	InitMultipartUpload(ctx context.Context, key string, contentType string) (*MultipartUpload, error)
 
 	// GeneratePresignedPartURL 生成分片上传预签名 URL
 	// 参数：
@@ -82,8 +92,9 @@ type Storage interface {
 	//   - ctx: 上下文
 	//   - key: 对象键
 	//   - expiry: URL 过期时间（建议 15 分钟）
+	//   - opts: 响应头选项（可选，传 nil 使用默认行为）
 	// 返回：预签名 URL、错误信息
-	GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error)
+	GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration, opts *PresignOptions) (string, error)
 
 	// Delete 删除对象
 	// 参数：

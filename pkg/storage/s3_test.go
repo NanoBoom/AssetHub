@@ -22,7 +22,7 @@ func NewMockS3Storage() *MockS3Storage {
 }
 
 // Upload 实现 Storage 接口
-func (m *MockS3Storage) Upload(ctx context.Context, key string, reader io.Reader, size int64) error {
+func (m *MockS3Storage) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ func (m *MockS3Storage) GeneratePresignedUploadURL(ctx context.Context, key stri
 }
 
 // InitMultipartUpload 实现 Storage 接口
-func (m *MockS3Storage) InitMultipartUpload(ctx context.Context, key string) (*MultipartUpload, error) {
+func (m *MockS3Storage) InitMultipartUpload(ctx context.Context, key string, contentType string) (*MultipartUpload, error) {
 	return &MultipartUpload{
 		UploadID: "mock-upload-id-" + key,
 		Key:      key,
@@ -79,7 +79,7 @@ func TestUpload(t *testing.T) {
 	reader := strings.NewReader(content)
 
 	// 执行上传
-	err := storage.Upload(ctx, key, reader, int64(len(content)))
+	err := storage.Upload(ctx, key, reader, int64(len(content)), "text/plain")
 	if err != nil {
 		t.Fatalf("Upload failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestMultipartUpload(t *testing.T) {
 	key := "test/large-file.mp4"
 
 	// 1. 初始化分片上传
-	upload, err := storage.InitMultipartUpload(ctx, key)
+	upload, err := storage.InitMultipartUpload(ctx, key, "video/mp4")
 	if err != nil {
 		t.Fatalf("InitMultipartUpload failed: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestDelete(t *testing.T) {
 	key := "test/file.txt"
 	content := "Hello, World!"
 	reader := bytes.NewReader([]byte(content))
-	err := storage.Upload(ctx, key, reader, int64(len(content)))
+	err := storage.Upload(ctx, key, reader, int64(len(content)), "text/plain")
 	if err != nil {
 		t.Fatalf("Upload failed: %v", err)
 	}

@@ -75,13 +75,20 @@ func NewS3Storage(ctx context.Context, cfg S3Config) (*S3Storage, error) {
 }
 
 // Upload 直接上传文件（后端代理）
-func (s *S3Storage) Upload(ctx context.Context, key string, reader io.Reader, size int64) error {
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+func (s *S3Storage) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
+	input := &s3.PutObjectInput{
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(key),
 		Body:          reader,
 		ContentLength: aws.Int64(size),
-	})
+	}
+
+	// 设置 Content-Type
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+
+	_, err := s.client.PutObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
@@ -89,13 +96,20 @@ func (s *S3Storage) Upload(ctx context.Context, key string, reader io.Reader, si
 }
 
 // GeneratePresignedUploadURL 生成小文件上传预签名 URL（前端直传）
-func (s *S3Storage) GeneratePresignedUploadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+func (s *S3Storage) GeneratePresignedUploadURL(ctx context.Context, key string, expiry time.Duration, contentType string) (string, error) {
 	presignClient := s3.NewPresignClient(s.client)
 
-	req, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-	}, func(opts *s3.PresignOptions) {
+	}
+
+	// 设置 Content-Type（必须与实际上传时一致，否则 S3 V4 签名验证失败）
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+
+	req, err := presignClient.PresignPutObject(ctx, input, func(opts *s3.PresignOptions) {
 		opts.Expires = expiry
 	})
 	if err != nil {
@@ -106,11 +120,18 @@ func (s *S3Storage) GeneratePresignedUploadURL(ctx context.Context, key string, 
 }
 
 // InitMultipartUpload 初始化分片上传
-func (s *S3Storage) InitMultipartUpload(ctx context.Context, key string) (*MultipartUpload, error) {
-	output, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+func (s *S3Storage) InitMultipartUpload(ctx context.Context, key string, contentType string) (*MultipartUpload, error) {
+	input := &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-	})
+	}
+
+	// 设置 Content-Type（必须在初始化时设置）
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+
+	output, err := s.client.CreateMultipartUpload(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init multipart upload: %w", err)
 	}
@@ -168,13 +189,25 @@ func (s *S3Storage) CompleteMultipartUpload(ctx context.Context, key string, upl
 }
 
 // GeneratePresignedDownloadURL 生成下载预签名 URL
-func (s *S3Storage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+func (s *S3Storage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration, opts *PresignOptions) (string, error) {
 	presignClient := s3.NewPresignClient(s.client)
 
-	req, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+	input := &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-	}, func(opts *s3.PresignOptions) {
+	}
+
+	// 设置响应头选项
+	if opts != nil {
+		if opts.ContentType != "" {
+			input.ResponseContentType = aws.String(opts.ContentType)
+		}
+		if opts.ContentDisposition != "" {
+			input.ResponseContentDisposition = aws.String(opts.ContentDisposition)
+		}
+	}
+
+	req, err := presignClient.PresignGetObject(ctx, input, func(opts *s3.PresignOptions) {
 		opts.Expires = expiry
 	})
 	if err != nil {

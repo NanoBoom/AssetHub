@@ -58,12 +58,19 @@ func NewOSSStorage(ctx context.Context, cfg OSSConfig) (*OSSStorage, error) {
 }
 
 // Upload 直接上传文件（后端代理）
-func (o *OSSStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64) error {
-	_, err := o.client.PutObject(ctx, &oss.PutObjectRequest{
+func (o *OSSStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
+	req := &oss.PutObjectRequest{
 		Bucket: oss.Ptr(o.bucket),
 		Key:    oss.Ptr(key),
 		Body:   reader,
-	})
+	}
+
+	// 设置 Content-Type（必须在上传时设置，不能在下载时覆盖）
+	if contentType != "" {
+		req.ContentType = oss.Ptr(contentType)
+	}
+
+	_, err := o.client.PutObject(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
@@ -71,24 +78,38 @@ func (o *OSSStorage) Upload(ctx context.Context, key string, reader io.Reader, s
 }
 
 // GeneratePresignedUploadURL 生成小文件上传预签名 URL（前端直传）
-func (o *OSSStorage) GeneratePresignedUploadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	req, err := o.client.Presign(ctx, &oss.PutObjectRequest{
+func (o *OSSStorage) GeneratePresignedUploadURL(ctx context.Context, key string, expiry time.Duration, contentType string) (string, error) {
+	req := &oss.PutObjectRequest{
 		Bucket: oss.Ptr(o.bucket),
 		Key:    oss.Ptr(key),
-	}, oss.PresignExpires(expiry))
+	}
+
+	// 设置 Content-Type（必须与实际上传时一致，否则 OSS V4 签名验证失败）
+	if contentType != "" {
+		req.ContentType = oss.Ptr(contentType)
+	}
+
+	result, err := o.client.Presign(ctx, req, oss.PresignExpires(expiry))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned upload URL: %w", err)
 	}
 
-	return req.URL, nil
+	return result.URL, nil
 }
 
 // InitMultipartUpload 初始化分片上传
-func (o *OSSStorage) InitMultipartUpload(ctx context.Context, key string) (*MultipartUpload, error) {
-	output, err := o.client.InitiateMultipartUpload(ctx, &oss.InitiateMultipartUploadRequest{
+func (o *OSSStorage) InitMultipartUpload(ctx context.Context, key string, contentType string) (*MultipartUpload, error) {
+	req := &oss.InitiateMultipartUploadRequest{
 		Bucket: oss.Ptr(o.bucket),
 		Key:    oss.Ptr(key),
-	})
+	}
+
+	// 设置 Content-Type（必须在初始化时设置）
+	if contentType != "" {
+		req.ContentType = oss.Ptr(contentType)
+	}
+
+	output, err := o.client.InitiateMultipartUpload(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init multipart upload: %w", err)
 	}
@@ -142,16 +163,23 @@ func (o *OSSStorage) CompleteMultipartUpload(ctx context.Context, key string, up
 }
 
 // GeneratePresignedDownloadURL 生成下载预签名 URL
-func (o *OSSStorage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	req, err := o.client.Presign(ctx, &oss.GetObjectRequest{
+func (o *OSSStorage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration, opts *PresignOptions) (string, error) {
+	req := &oss.GetObjectRequest{
 		Bucket: oss.Ptr(o.bucket),
 		Key:    oss.Ptr(key),
-	}, oss.PresignExpires(expiry))
+	}
+
+	// 只设置 Content-Disposition（OSS 不允许覆盖 Content-Type）
+	if opts != nil && opts.ContentDisposition != "" {
+		req.ResponseContentDisposition = oss.Ptr(opts.ContentDisposition)
+	}
+
+	result, err := o.client.Presign(ctx, req, oss.PresignExpires(expiry))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned download URL: %w", err)
 	}
 
-	return req.URL, nil
+	return result.URL, nil
 }
 
 // Delete 删除对象

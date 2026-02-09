@@ -1,15 +1,19 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"path/filepath"
 	"time"
 
 	"github.com/NanoBoom/asethub/internal/models"
 	"github.com/NanoBoom/asethub/internal/repositories"
 	"github.com/NanoBoom/asethub/pkg/storage"
+	"github.com/NanoBoom/asethub/pkg/utils"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -22,25 +26,25 @@ type FileService interface {
 	InitPresignedUpload(ctx context.Context, name string, contentType string, size int64) (*PresignedUploadResult, error)
 
 	// ConfirmUpload 确认前端直传完成
-	ConfirmUpload(ctx context.Context, fileID uint) (*models.File, error)
+	ConfirmUpload(ctx context.Context, fileID uuid.UUID) (*models.File, error)
 
 	// InitMultipartUpload 初始化大文件分片上传
 	InitMultipartUpload(ctx context.Context, name string, contentType string, size int64) (*MultipartUploadResult, error)
 
 	// GeneratePartUploadURL 生成分片上传预签名 URL
-	GeneratePartUploadURL(ctx context.Context, fileID uint, partNumber int) (string, error)
+	GeneratePartUploadURL(ctx context.Context, fileID uuid.UUID, partNumber int) (string, error)
 
 	// CompleteMultipartUpload 完成大文件分片上传
-	CompleteMultipartUpload(ctx context.Context, fileID uint, parts []storage.CompletedPart) (*models.File, error)
+	CompleteMultipartUpload(ctx context.Context, fileID uuid.UUID, parts []storage.CompletedPart) (*models.File, error)
 
 	// GetDownloadURL 生成下载预签名 URL
-	GetDownloadURL(ctx context.Context, fileID uint, expiry time.Duration) (string, error)
+	GetDownloadURL(ctx context.Context, fileID uuid.UUID, expiry time.Duration) (string, error)
 
 	// DeleteFile 删除文件（S3 + 数据库）
-	DeleteFile(ctx context.Context, fileID uint) error
+	DeleteFile(ctx context.Context, fileID uuid.UUID) error
 
 	// GetFile 获取文件信息
-	GetFile(ctx context.Context, fileID uint) (*models.File, error)
+	GetFile(ctx context.Context, fileID uuid.UUID) (*models.File, error)
 
 	// ListFiles 分页查询文件列表
 	ListFiles(ctx context.Context, offset, limit int) ([]*models.File, int64, error)
@@ -48,17 +52,17 @@ type FileService interface {
 
 // PresignedUploadResult 预签名上传结果
 type PresignedUploadResult struct {
-	FileID     uint   `json:"file_id"`
-	UploadURL  string `json:"upload_url"`
-	StorageKey string `json:"storage_key"`
-	ExpiresIn  int64  `json:"expires_in"` // 秒
+	FileID     uuid.UUID `json:"file_id"`
+	UploadURL  string    `json:"upload_url"`
+	StorageKey string    `json:"storage_key"`
+	ExpiresIn  int64     `json:"expires_in"` // 秒
 }
 
 // MultipartUploadResult 分片上传初始化结果
 type MultipartUploadResult struct {
-	FileID     uint   `json:"file_id"`
-	UploadID   string `json:"upload_id"`
-	StorageKey string `json:"storage_key"`
+	FileID     uuid.UUID `json:"file_id"`
+	UploadID   string    `json:"upload_id"`
+	StorageKey string    `json:"storage_key"`
 }
 
 // fileService 文件服务实现
@@ -77,17 +81,44 @@ func NewFileService(fileRepo repositories.FileRepository, storage storage.Storag
 	}
 }
 
-// generateStorageKey 生成存储键
-func (s *fileService) generateStorageKey(name string) string {
+// generateStorageKey 生成存储键（确保始终带扩展名）
+// 参数：
+//   - name: 原始文件名
+//   - contentType: MIME 类型（用于推断扩展名）
+func (s *fileService) generateStorageKey(name string, contentType string) string {
 	timestamp := time.Now().Unix()
+
+	// 优先使用文件名中的扩展名
 	ext := filepath.Ext(name)
+
+	// 如果文件名没有扩展名，从 Content-Type 推断
+	if ext == "" {
+		ext = utils.GetExtensionFromMIME(contentType)
+	}
+
 	return fmt.Sprintf("files/%d/%s%s", timestamp, fmt.Sprintf("%d", timestamp), ext)
 }
 
 // UploadDirect 直接上传小文件（后端代理）
 func (s *fileService) UploadDirect(ctx context.Context, name string, contentType string, size int64, reader io.Reader) (*models.File, error) {
-	// 生成存储键
-	storageKey := s.generateStorageKey(name)
+	// 检测 Content-Type（读取前 512 字节）
+	buffer := make([]byte, 512)
+	n, err := reader.Read(buffer)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to read file header: %w", err)
+	}
+
+	// 自动检测 Content-Type
+	detectedType := http.DetectContentType(buffer[:n])
+
+	// 使用检测结果（忽略客户端提供的 Content-Type）
+	contentType = detectedType
+
+	// 创建新的 reader，包含已读取的 buffer 和剩余内容
+	multiReader := io.MultiReader(bytes.NewReader(buffer[:n]), reader)
+
+	// 生成存储键（传入 contentType 以确保有扩展名）
+	storageKey := s.generateStorageKey(name, contentType)
 
 	// 创建文件记录
 	file := &models.File{
@@ -112,8 +143,8 @@ func (s *fileService) UploadDirect(ctx context.Context, name string, contentType
 		return nil, fmt.Errorf("failed to create file record: %w", err)
 	}
 
-	// 上传到 S3
-	if err := s.storage.Upload(ctx, storageKey, reader, size); err != nil {
+	// 上传到 S3（使用 multiReader 包含完整内容，并设置 Content-Type）
+	if err := s.storage.Upload(ctx, storageKey, multiReader, size, contentType); err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("failed to upload to storage: %w", err)
 	}
@@ -137,8 +168,23 @@ func (s *fileService) UploadDirect(ctx context.Context, name string, contentType
 
 // InitPresignedUpload 生成小文件上传预签名 URL
 func (s *fileService) InitPresignedUpload(ctx context.Context, name string, contentType string, size int64) (*PresignedUploadResult, error) {
-	// 生成存储键
-	storageKey := s.generateStorageKey(name)
+	// 根据文件名推断 Content-Type（不信任前端输入）
+	detectedType := utils.DetectContentTypeFromFilename(name)
+
+	// 如果前端提供了 Content-Type，验证是否匹配
+	if contentType != "" && contentType != "application/octet-stream" {
+		matches, _ := utils.ValidateContentType(name, contentType)
+		if !matches {
+			// 前端提供的类型与文件扩展名不匹配，使用推断的类型
+			contentType = detectedType
+		}
+	} else {
+		// 前端未提供或提供默认值，使用推断的类型
+		contentType = detectedType
+	}
+
+	// 生成存储键（传入 contentType 以确保有扩展名）
+	storageKey := s.generateStorageKey(name, contentType)
 
 	// 创建文件记录
 	file := &models.File{
@@ -153,9 +199,9 @@ func (s *fileService) InitPresignedUpload(ctx context.Context, name string, cont
 		return nil, fmt.Errorf("failed to create file record: %w", err)
 	}
 
-	// 生成预签名 URL（1 小时有效期）
+	// 生成预签名 URL（1 小时有效期，传递 contentType 确保签名一致）
 	expiry := 1 * time.Hour
-	uploadURL, err := s.storage.GeneratePresignedUploadURL(ctx, storageKey, expiry)
+	uploadURL, err := s.storage.GeneratePresignedUploadURL(ctx, storageKey, expiry, contentType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate presigned URL: %w", err)
 	}
@@ -169,7 +215,7 @@ func (s *fileService) InitPresignedUpload(ctx context.Context, name string, cont
 }
 
 // ConfirmUpload 确认前端直传完成
-func (s *fileService) ConfirmUpload(ctx context.Context, fileID uint) (*models.File, error) {
+func (s *fileService) ConfirmUpload(ctx context.Context, fileID uuid.UUID) (*models.File, error) {
 	// 查询文件记录
 	file, err := s.fileRepo.GetByID(ctx, fileID)
 	if err != nil {
@@ -187,11 +233,24 @@ func (s *fileService) ConfirmUpload(ctx context.Context, fileID uint) (*models.F
 
 // InitMultipartUpload 初始化大文件分片上传
 func (s *fileService) InitMultipartUpload(ctx context.Context, name string, contentType string, size int64) (*MultipartUploadResult, error) {
-	// 生成存储键
-	storageKey := s.generateStorageKey(name)
+	// 根据文件名推断 Content-Type（与预签名上传保持一致）
+	detectedType := utils.DetectContentTypeFromFilename(name)
 
-	// 初始化 S3 分片上传
-	multipartUpload, err := s.storage.InitMultipartUpload(ctx, storageKey)
+	// 如果前端提供了 Content-Type，验证是否匹配
+	if contentType != "" && contentType != "application/octet-stream" {
+		matches, _ := utils.ValidateContentType(name, contentType)
+		if !matches {
+			contentType = detectedType
+		}
+	} else {
+		contentType = detectedType
+	}
+
+	// 生成存储键（传入 contentType 以确保有扩展名）
+	storageKey := s.generateStorageKey(name, contentType)
+
+	// 初始化 S3 分片上传（传递 Content-Type）
+	multipartUpload, err := s.storage.InitMultipartUpload(ctx, storageKey, contentType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init multipart upload: %w", err)
 	}
@@ -218,7 +277,7 @@ func (s *fileService) InitMultipartUpload(ctx context.Context, name string, cont
 }
 
 // GeneratePartUploadURL 生成分片上传预签名 URL
-func (s *fileService) GeneratePartUploadURL(ctx context.Context, fileID uint, partNumber int) (string, error) {
+func (s *fileService) GeneratePartUploadURL(ctx context.Context, fileID uuid.UUID, partNumber int) (string, error) {
 	// 查询文件记录
 	file, err := s.fileRepo.GetByID(ctx, fileID)
 	if err != nil {
@@ -240,7 +299,7 @@ func (s *fileService) GeneratePartUploadURL(ctx context.Context, fileID uint, pa
 }
 
 // CompleteMultipartUpload 完成大文件分片上传
-func (s *fileService) CompleteMultipartUpload(ctx context.Context, fileID uint, parts []storage.CompletedPart) (*models.File, error) {
+func (s *fileService) CompleteMultipartUpload(ctx context.Context, fileID uuid.UUID, parts []storage.CompletedPart) (*models.File, error) {
 	// 查询文件记录
 	file, err := s.fileRepo.GetByID(ctx, fileID)
 	if err != nil {
@@ -266,7 +325,7 @@ func (s *fileService) CompleteMultipartUpload(ctx context.Context, fileID uint, 
 }
 
 // GetDownloadURL 生成下载预签名 URL
-func (s *fileService) GetDownloadURL(ctx context.Context, fileID uint, expiry time.Duration) (string, error) {
+func (s *fileService) GetDownloadURL(ctx context.Context, fileID uuid.UUID, expiry time.Duration) (string, error) {
 	// 查询文件记录
 	file, err := s.fileRepo.GetByID(ctx, fileID)
 	if err != nil {
@@ -277,8 +336,20 @@ func (s *fileService) GetDownloadURL(ctx context.Context, fileID uint, expiry ti
 		return "", fmt.Errorf("file is not ready for download")
 	}
 
+	// 判断是否可预览
+	disposition := "attachment"
+	if utils.IsPreviewable(file.ContentType) {
+		disposition = "inline"
+	}
+
+	// 构造响应头选项
+	opts := &storage.PresignOptions{
+		ContentType:        file.ContentType,
+		ContentDisposition: disposition,
+	}
+
 	// 生成下载预签名 URL
-	downloadURL, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, expiry)
+	downloadURL, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, expiry, opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate download URL: %w", err)
 	}
@@ -287,7 +358,7 @@ func (s *fileService) GetDownloadURL(ctx context.Context, fileID uint, expiry ti
 }
 
 // DeleteFile 删除文件（S3 + 数据库）
-func (s *fileService) DeleteFile(ctx context.Context, fileID uint) error {
+func (s *fileService) DeleteFile(ctx context.Context, fileID uuid.UUID) error {
 	// 查询文件记录
 	file, err := s.fileRepo.GetByID(ctx, fileID)
 	if err != nil {
@@ -323,7 +394,7 @@ func (s *fileService) DeleteFile(ctx context.Context, fileID uint) error {
 }
 
 // GetFile 获取文件信息
-func (s *fileService) GetFile(ctx context.Context, fileID uint) (*models.File, error) {
+func (s *fileService) GetFile(ctx context.Context, fileID uuid.UUID) (*models.File, error) {
 	return s.fileRepo.GetByID(ctx, fileID)
 }
 

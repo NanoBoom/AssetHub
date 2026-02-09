@@ -22,7 +22,7 @@ func NewMockOSSStorage() *MockOSSStorage {
 }
 
 // Upload 实现 Storage 接口
-func (m *MockOSSStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64) error {
+func (m *MockOSSStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ func (m *MockOSSStorage) GeneratePresignedUploadURL(ctx context.Context, key str
 }
 
 // InitMultipartUpload 实现 Storage 接口
-func (m *MockOSSStorage) InitMultipartUpload(ctx context.Context, key string) (*MultipartUpload, error) {
+func (m *MockOSSStorage) InitMultipartUpload(ctx context.Context, key string, contentType string) (*MultipartUpload, error) {
 	return &MultipartUpload{
 		UploadID: "mock-upload-id-" + key,
 		Key:      key,
@@ -79,7 +79,7 @@ func TestOSSUpload(t *testing.T) {
 	reader := strings.NewReader(content)
 
 	// 执行上传
-	err := storage.Upload(ctx, key, reader, int64(len(content)))
+	err := storage.Upload(ctx, key, reader, int64(len(content)), "text/plain")
 	if err != nil {
 		t.Fatalf("Upload failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestOSSMultipartUpload(t *testing.T) {
 	key := "test/large-file.mp4"
 
 	// 1. 初始化分片上传
-	upload, err := storage.InitMultipartUpload(ctx, key)
+	upload, err := storage.InitMultipartUpload(ctx, key, "video/mp4")
 	if err != nil {
 		t.Fatalf("InitMultipartUpload failed: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestOSSDelete(t *testing.T) {
 	key := "test/file.txt"
 	content := "Hello, OSS!"
 	reader := bytes.NewReader([]byte(content))
-	err := storage.Upload(ctx, key, reader, int64(len(content)))
+	err := storage.Upload(ctx, key, reader, int64(len(content)), "text/plain")
 	if err != nil {
 		t.Fatalf("Upload failed: %v", err)
 	}
