@@ -6,6 +6,9 @@ FROM golang:1.25-alpine AS builder
 # 安装构建依赖
 RUN apk add --no-cache git make
 
+# 安装 swag（用于生成 Swagger 文档）
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # 设置工作目录
 WORKDIR /build
 
@@ -17,6 +20,9 @@ RUN go mod download
 
 # 复制源代码
 COPY . .
+
+# 生成 Swagger 文档
+RUN swag init -g cmd/api/main.go -o docs
 
 # 构建应用（静态链接，减小体积）
 # -s: 去除符号表
