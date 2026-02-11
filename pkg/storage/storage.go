@@ -87,6 +87,14 @@ type Storage interface {
 
 	// === 通用操作 ===
 
+	// GetObject 获取对象内容（流式读取）
+	// 适用场景：直接下载文件，后端代理传输
+	// 参数：
+	//   - ctx: 上下文
+	//   - key: 对象键
+	// 返回：io.ReadCloser（文件流，使用后必须关闭）、Content-Type、Content-Length、错误信息
+	GetObject(ctx context.Context, key string) (io.ReadCloser, string, int64, error)
+
 	// GeneratePresignedDownloadURL 生成下载预签名 URL
 	// 参数：
 	//   - ctx: 上下文

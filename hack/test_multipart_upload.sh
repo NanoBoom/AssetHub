@@ -32,7 +32,7 @@ echo ""
 
 # 步骤 1: 初始化分片上传
 echo "2. 初始化分片上传..."
-INIT_RESPONSE=$(curl -s -X POST "$API_BASE/files/upload/multipart/init" \
+INIT_RESPONSE=$(curl -s -X POST "$API_BASE/files/multipart" \
   -H "Content-Type: application/json" \
   -d "{
     \"name\": \"test_multipart.bin\",
@@ -65,10 +65,9 @@ for ((part_num=1; part_num<=TOTAL_PARTS; part_num++)); do
   echo "   分片 $part_num/$TOTAL_PARTS:"
 
   # 生成分片预签名 URL
-  PART_URL_RESPONSE=$(curl -s -X POST "$API_BASE/files/upload/multipart/part-url" \
+  PART_URL_RESPONSE=$(curl -s -X POST "$API_BASE/files/$FILE_ID/multipart/parts" \
     -H "Content-Type: application/json" \
     -d "{
-      \"file_id\": \"$FILE_ID\",
       \"part_number\": $part_num
     }")
 
@@ -126,10 +125,9 @@ echo ""
 
 # 步骤 4: 完成分片上传
 echo "4. 完成分片上传..."
-COMPLETE_RESPONSE=$(curl -s -X POST "$API_BASE/files/upload/multipart/complete" \
+COMPLETE_RESPONSE=$(curl -s -X POST "$API_BASE/files/$FILE_ID/multipart/completion" \
   -H "Content-Type: application/json" \
   -d "{
-    \"file_id\": \"$FILE_ID\",
     \"parts\": $PARTS_JSON
   }")
 
@@ -149,21 +147,40 @@ FILE_INFO=$(curl -s "$API_BASE/files/$FILE_ID")
 echo "   响应: $(echo "$FILE_INFO" | jq -c .)"
 echo ""
 
-# 步骤 6: 获取下载 URL
-echo "6. 获取下载 URL..."
-DOWNLOAD_RESPONSE=$(curl -s "$API_BASE/files/$FILE_ID/download-url")
+# 步骤 6: 获取预签名下载 URL
+echo "6. 获取预签名下载 URL..."
+DOWNLOAD_RESPONSE=$(curl -s "$API_BASE/files/$FILE_ID/link")
 DOWNLOAD_URL=$(echo "$DOWNLOAD_RESPONSE" | jq -r '.data.download_url')
 echo "   下载 URL: ${DOWNLOAD_URL:0:100}..."
 echo ""
 
-# 步骤 7: 验证下载（下载前 100 字节验证）
-echo "7. 验证下载..."
+# 步骤 7: 验证预签名 URL 下载（下载前 100 字节验证）
+echo "7. 验证预签名 URL 下载..."
 DOWNLOAD_SIZE=$(curl -s -I "$DOWNLOAD_URL" | grep -i "content-length" | awk '{print $2}' | tr -d '\r')
 if [ -n "$DOWNLOAD_SIZE" ]; then
-  echo "   ✅ 下载 URL 有效"
+  echo "   ✅ 预签名 URL 有效"
   echo "   文件大小: $DOWNLOAD_SIZE bytes"
 else
   echo "   ⚠️  无法验证下载 URL"
+fi
+echo ""
+
+# 步骤 8: 测试直接下载端点
+echo "8. 测试直接下载端点..."
+# 使用 -D - 获取响应头，-o /dev/null 丢弃响应体
+DIRECT_DOWNLOAD=$(curl -s -D - -o /dev/null "$API_BASE/files/$FILE_ID/download" 2>&1)
+HTTP_STATUS=$(echo "$DIRECT_DOWNLOAD" | grep "HTTP/" | awk '{print $2}')
+CONTENT_TYPE=$(echo "$DIRECT_DOWNLOAD" | grep -i "Content-Type:" | cut -d' ' -f2- | tr -d '\r')
+CONTENT_DISPOSITION=$(echo "$DIRECT_DOWNLOAD" | grep -i "Content-Disposition:" | cut -d' ' -f2- | tr -d '\r')
+DIRECT_SIZE=$(echo "$DIRECT_DOWNLOAD" | grep -i "Content-Length:" | awk '{print $2}' | tr -d '\r')
+
+if [ "$HTTP_STATUS" = "200" ]; then
+  echo "   ✅ 直接下载成功 (HTTP 200)"
+  echo "   Content-Type: $CONTENT_TYPE"
+  echo "   Content-Disposition: $CONTENT_DISPOSITION"
+  echo "   Content-Length: $DIRECT_SIZE bytes"
+else
+  echo "   ❌ 直接下载失败 (HTTP $HTTP_STATUS)"
 fi
 echo ""
 

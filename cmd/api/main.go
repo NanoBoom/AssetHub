@@ -139,19 +139,20 @@ func setupRouter(cfg *config.Config, zapLogger *zap.Logger, db *gorm.DB, redisCl
 		files := api.Group("/files")
 		{
 			// 小文件上传
-			files.POST("/upload", fileHandler.UploadDirect)
-			files.POST("/upload/presigned", fileHandler.InitPresignedUpload)
-			files.POST("/upload/confirm", fileHandler.ConfirmUpload)
+			files.POST("", fileHandler.UploadDirect)                      // POST /files
+			files.POST("/presigned", fileHandler.InitPresignedUpload)     // POST /files/presigned
+			files.POST("/:id/completion", fileHandler.ConfirmUpload)      // POST /files/{id}/completion
 
 			// 大文件分片上传
-			files.POST("/upload/multipart/init", fileHandler.InitMultipartUpload)
-			files.POST("/upload/multipart/part-url", fileHandler.GeneratePartURL)
-			files.POST("/upload/multipart/complete", fileHandler.CompleteMultipartUpload)
+			files.POST("/multipart", fileHandler.InitMultipartUpload)                // POST /files/multipart
+			files.POST("/:id/multipart/parts", fileHandler.GeneratePartURL)          // POST /files/{id}/multipart/parts
+			files.POST("/:id/multipart/completion", fileHandler.CompleteMultipartUpload) // POST /files/{id}/multipart/completion
 
 			// 通用操作
-			files.GET("/:id/download-url", fileHandler.GetDownloadURL)
-			files.GET("/:id", fileHandler.GetFile)
-			files.DELETE("/:id", fileHandler.DeleteFile)
+			files.GET("/:id/link", fileHandler.GetDownloadURL)     // GET /files/{id}/link
+			files.GET("/:id/download", fileHandler.DownloadFile)   // GET /files/{id}/download
+			files.GET("/:id", fileHandler.GetFile)                 // GET /files/{id}
+			files.DELETE("/:id", fileHandler.DeleteFile)           // DELETE /files/{id}
 		}
 	}
 

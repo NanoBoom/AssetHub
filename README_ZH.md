@@ -10,6 +10,8 @@
 - ✅ **直接上传** - 小文件后端代理上传
 - ✅ **预签名上传** - 前端直传，使用预签名 URL
 - ✅ **分片上传** - 大文件分片上传（支持 GB 级视频）
+- ✅ **直接下载** - 后端流式下载文件
+- ✅ **预签名下载** - 安全的临时下载链接
 - ✅ **元数据管理** - 完整的文件信息存储和查询
 - ✅ **RESTful API** - 标准 HTTP 接口，带 Swagger 文档
 - ✅ **健康检查** - 数据库和 Redis 连接监控
@@ -160,24 +162,32 @@ open http://localhost:8003/swagger/index.html
 
 ## API 端点
 
+> **注意**：API 已重构为符合 RESTful 最佳实践。详见 [API_REFACTORING.md](docs/API_REFACTORING.md) 迁移指南。
+
 ### 健康检查
 
 - `GET /health` - 检查数据库和 Redis 连接状态
 
 ### 文件上传
 
-- `POST /files/upload/direct` - 直接上传（后端代理）
-- `POST /files/upload/presigned/init` - 初始化预签名上传
-- `POST /files/upload/presigned/confirm` - 确认预签名上传
-- `POST /files/upload/multipart/init` - 初始化分片上传
-- `POST /files/upload/multipart/part-url` - 生成分片上传 URL
-- `POST /files/upload/multipart/complete` - 完成分片上传
+**直接上传**（后端代理）
+- `POST /api/v1/files` - 通过后端直接上传小文件
+
+**预签名上传**（前端直传）
+- `POST /api/v1/files/presigned` - 初始化预签名上传，获取上传 URL
+- `POST /api/v1/files/{id}/completion` - 确认上传完成
+
+**分片上传**（大文件）
+- `POST /api/v1/files/multipart` - 初始化分片上传
+- `POST /api/v1/files/{id}/multipart/parts` - 生成分片上传 URL
+- `POST /api/v1/files/{id}/multipart/completion` - 完成分片上传
 
 ### 文件管理
 
-- `GET /files/:id/download-url` - 获取下载 URL（预签名）
-- `GET /files/:id` - 获取文件元数据
-- `DELETE /files/:id` - 删除文件
+- `GET /api/v1/files/{id}` - 获取文件元数据
+- `GET /api/v1/files/{id}/link` - 获取下载 URL（预签名，15分钟有效）
+- `GET /api/v1/files/{id}/download` - 直接下载文件内容（流式传输）
+- `DELETE /api/v1/files/{id}` - 删除文件（返回 204 No Content）
 
 完整 API 文档：`http://localhost:8003/swagger/index.html`
 
@@ -191,7 +201,7 @@ sequenceDiagram
     participant AssetHub as AssetHub 后端
     participant S3/OSS as S3/OSS 存储
 
-    Client->>AssetHub: POST /files/upload/presigned/init<br/>{name, content_type, size}
+    Client->>AssetHub: POST /api/v1/files/presigned<br/>{name, content_type, size}
     AssetHub->>AssetHub: 创建文件记录 (status=pending)
     AssetHub->>S3/OSS: 生成预签名 PUT URL
     S3/OSS-->>AssetHub: 预签名 URL (1小时有效)
@@ -200,7 +210,7 @@ sequenceDiagram
     Client->>S3/OSS: PUT 文件到预签名 URL<br/>（直传，不经过后端）
     S3/OSS-->>Client: 200 OK
 
-    Client->>AssetHub: POST /files/upload/presigned/confirm<br/>{file_id}
+    Client->>AssetHub: POST /api/v1/files/{id}/completion
     AssetHub->>AssetHub: 更新文件状态为 completed
     AssetHub-->>Client: {file_id, status=completed}
 ```
@@ -215,14 +225,14 @@ sequenceDiagram
     participant AssetHub as AssetHub 后端
     participant S3/OSS as S3/OSS 存储
 
-    Client->>AssetHub: POST /files/upload/multipart/init<br/>{name, content_type, size}
+    Client->>AssetHub: POST /api/v1/files/multipart<br/>{name, content_type, size}
     AssetHub->>AssetHub: 创建文件记录 (status=uploading)
     AssetHub->>S3/OSS: 初始化分片上传
     S3/OSS-->>AssetHub: upload_id
     AssetHub-->>Client: {file_id, upload_id, storage_key}
 
     loop 对每个分片 (1 到 N)
-        Client->>AssetHub: POST /files/upload/multipart/part-url<br/>{file_id, part_number}
+        Client->>AssetHub: POST /api/v1/files/{id}/multipart/parts<br/>{part_number}
         AssetHub->>S3/OSS: 生成分片预签名 URL
         S3/OSS-->>AssetHub: 预签名 URL
         AssetHub-->>Client: {part_number, upload_url}
@@ -231,7 +241,7 @@ sequenceDiagram
         S3/OSS-->>Client: 200 OK + ETag
     end
 
-    Client->>AssetHub: POST /files/upload/multipart/complete<br/>{file_id, parts: [{part_number, etag}]}
+    Client->>AssetHub: POST /api/v1/files/{id}/multipart/completion<br/>{parts: [{part_number, etag}]}
     AssetHub->>S3/OSS: 完成分片上传
     S3/OSS-->>AssetHub: 200 OK
     AssetHub->>AssetHub: 更新文件状态为 completed
@@ -248,7 +258,7 @@ sequenceDiagram
     participant AssetHub as AssetHub 后端
     participant S3/OSS as S3/OSS 存储
 
-    Client->>AssetHub: GET /files/:id/download-url
+    Client->>AssetHub: GET /api/v1/files/{id}/link
     AssetHub->>AssetHub: 查询文件元数据
     AssetHub->>S3/OSS: 生成预签名 GET URL
     S3/OSS-->>AssetHub: 预签名 URL (15分钟有效)
@@ -259,6 +269,32 @@ sequenceDiagram
 ```
 
 **适用场景**：安全的文件访问控制，带过期时间，减少后端带宽消耗。
+
+### 4. 直接下载（流式传输）
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant AssetHub as AssetHub 后端
+    participant S3/OSS as S3/OSS 存储
+
+    Client->>AssetHub: GET /api/v1/files/{id}/download
+    AssetHub->>AssetHub: 查询文件元数据
+    AssetHub->>S3/OSS: GetObject 请求
+    S3/OSS-->>AssetHub: 文件流
+    AssetHub-->>Client: 流式传输文件内容<br/>（Content-Type, Content-Disposition）
+```
+
+**适用场景**：后端代理下载，自动设置 Content-Disposition（可预览文件使用 inline，其他使用 attachment）。
+
+**与预签名下载的对比**：
+
+| 特性 | 直接下载 | 预签名下载 |
+|------|---------|-----------|
+| 带宽消耗 | 使用后端带宽 | 直接从 S3/OSS |
+| 延迟 | 稍高（代理） | 较低（直连） |
+| 安全性 | 后端鉴权 | 临时 URL |
+| 适用场景 | 小文件、需要鉴权 | 大文件、公开分享 |
 
 ## 开发指南
 

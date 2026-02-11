@@ -10,6 +10,8 @@ Enterprise-grade file storage microservice with unified API for multiple storage
 - ✅ **Direct Upload** - Backend proxy upload for small files
 - ✅ **Presigned Upload** - Frontend direct upload with presigned URLs
 - ✅ **Multipart Upload** - Chunked upload for large files (GB-scale videos)
+- ✅ **Direct Download** - Streaming file download through backend
+- ✅ **Presigned Download** - Secure temporary download URLs
 - ✅ **Metadata Management** - Complete file information storage and query
 - ✅ **RESTful API** - Standard HTTP interface with Swagger docs
 - ✅ **Health Check** - Database and Redis connectivity monitoring
@@ -317,24 +319,32 @@ open http://localhost:8003/swagger/index.html
 
 ## API Endpoints
 
+> **Note**: API has been refactored to follow RESTful best practices. See [API_REFACTORING.md](docs/API_REFACTORING.md) for migration guide.
+
 ### Health Check
 
 - `GET /health` - Check database and Redis connectivity
 
 ### File Upload
 
-- `POST /files/upload/direct` - Direct upload (backend proxy)
-- `POST /files/upload/presigned/init` - Initialize presigned upload
-- `POST /files/upload/presigned/confirm` - Confirm presigned upload
-- `POST /files/upload/multipart/init` - Initialize multipart upload
-- `POST /files/upload/multipart/part-url` - Generate part upload URL
-- `POST /files/upload/multipart/complete` - Complete multipart upload
+**Direct Upload** (Backend Proxy)
+- `POST /api/v1/files` - Upload small files directly through backend
+
+**Presigned Upload** (Frontend Direct Upload)
+- `POST /api/v1/files/presigned` - Initialize presigned upload, get upload URL
+- `POST /api/v1/files/{id}/completion` - Confirm upload completion
+
+**Multipart Upload** (Large Files)
+- `POST /api/v1/files/multipart` - Initialize multipart upload
+- `POST /api/v1/files/{id}/multipart/parts` - Generate part upload URL
+- `POST /api/v1/files/{id}/multipart/completion` - Complete multipart upload
 
 ### File Management
 
-- `GET /files/:id/download-url` - Get download URL (presigned)
-- `GET /files/:id` - Get file metadata
-- `DELETE /files/:id` - Delete file
+- `GET /api/v1/files/{id}` - Get file metadata
+- `GET /api/v1/files/{id}/link` - Get download URL (presigned, expires in 15min)
+- `GET /api/v1/files/{id}/download` - Direct download file content (streaming)
+- `DELETE /api/v1/files/{id}` - Delete file (returns 204 No Content)
 
 Full API documentation: `http://localhost:8003/swagger/index.html`
 
@@ -348,7 +358,7 @@ sequenceDiagram
     participant AssetHub
     participant S3/OSS
 
-    Client->>AssetHub: POST /files/upload/presigned/init<br/>{name, content_type, size}
+    Client->>AssetHub: POST /api/v1/files/presigned<br/>{name, content_type, size}
     AssetHub->>AssetHub: Create file record (status=pending)
     AssetHub->>S3/OSS: Generate presigned PUT URL
     S3/OSS-->>AssetHub: Presigned URL (expires in 1h)
@@ -357,7 +367,7 @@ sequenceDiagram
     Client->>S3/OSS: PUT file to presigned URL<br/>(direct upload, no proxy)
     S3/OSS-->>Client: 200 OK
 
-    Client->>AssetHub: POST /files/upload/presigned/confirm<br/>{file_id}
+    Client->>AssetHub: POST /api/v1/files/{id}/completion
     AssetHub->>AssetHub: Update file status to completed
     AssetHub-->>Client: {file_id, status=completed}
 ```
@@ -372,14 +382,14 @@ sequenceDiagram
     participant AssetHub
     participant S3/OSS
 
-    Client->>AssetHub: POST /files/upload/multipart/init<br/>{name, content_type, size}
+    Client->>AssetHub: POST /api/v1/files/multipart<br/>{name, content_type, size}
     AssetHub->>AssetHub: Create file record (status=uploading)
     AssetHub->>S3/OSS: Initiate multipart upload
     S3/OSS-->>AssetHub: upload_id
     AssetHub-->>Client: {file_id, upload_id, storage_key}
 
     loop For each part (1 to N)
-        Client->>AssetHub: POST /files/upload/multipart/part-url<br/>{file_id, part_number}
+        Client->>AssetHub: POST /api/v1/files/{id}/multipart/parts<br/>{part_number}
         AssetHub->>S3/OSS: Generate presigned URL for part
         S3/OSS-->>AssetHub: Presigned URL
         AssetHub-->>Client: {part_number, upload_url}
@@ -388,7 +398,7 @@ sequenceDiagram
         S3/OSS-->>Client: 200 OK + ETag
     end
 
-    Client->>AssetHub: POST /files/upload/multipart/complete<br/>{file_id, parts: [{part_number, etag}]}
+    Client->>AssetHub: POST /api/v1/files/{id}/multipart/completion<br/>{parts: [{part_number, etag}]}
     AssetHub->>S3/OSS: Complete multipart upload
     S3/OSS-->>AssetHub: 200 OK
     AssetHub->>AssetHub: Update file status to completed
@@ -405,7 +415,7 @@ sequenceDiagram
     participant AssetHub
     participant S3/OSS
 
-    Client->>AssetHub: GET /files/:id/download-url
+    Client->>AssetHub: GET /api/v1/files/{id}/link
     AssetHub->>AssetHub: Query file metadata
     AssetHub->>S3/OSS: Generate presigned GET URL
     S3/OSS-->>AssetHub: Presigned URL (expires in 15min)
@@ -416,6 +426,32 @@ sequenceDiagram
 ```
 
 **Use Case**: Secure file access with expiration, reduces backend bandwidth.
+
+### 4. Direct Download (Streaming)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant AssetHub
+    participant S3/OSS
+
+    Client->>AssetHub: GET /api/v1/files/{id}/download
+    AssetHub->>AssetHub: Query file metadata
+    AssetHub->>S3/OSS: GetObject request
+    S3/OSS-->>AssetHub: File stream
+    AssetHub-->>Client: Stream file content<br/>(Content-Type, Content-Disposition)
+```
+
+**Use Case**: Backend-proxied download with automatic Content-Disposition (inline for previewable files, attachment for others).
+
+**Comparison with Presigned Download**:
+
+| Feature | Direct Download | Presigned Download |
+|---------|----------------|-------------------|
+| Bandwidth | Uses backend bandwidth | Direct from S3/OSS |
+| Latency | Slightly higher (proxy) | Lower (direct) |
+| Security | Backend authentication | Temporary URL |
+| Use Case | Small files, auth required | Large files, public sharing |
 
 ## Development
 

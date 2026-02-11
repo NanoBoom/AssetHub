@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -8,6 +11,7 @@ import (
 	"github.com/NanoBoom/asethub/internal/services"
 	"github.com/NanoBoom/asethub/pkg/response"
 	"github.com/NanoBoom/asethub/pkg/storage"
+	"github.com/NanoBoom/asethub/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -142,16 +146,16 @@ type DeleteFileResponse struct {
 // UploadDirect godoc
 // @Summary      直接上传小文件
 // @Description  后端代理上传小文件到 S3
-// @Tags         files
+// @Tags         Direct Upload
 // @Accept       multipart/form-data
 // @Produce      json
 // @Param        name formData string true "文件名"
 // @Param        content_type formData string false "MIME 类型"
 // @Param        file formData file true "文件内容"
-// @Success      200 {object} response.Response{data=UploadDirectResponse}
+// @Success      201 {object} response.Response{data=UploadDirectResponse}
 // @Failure      400 {object} response.Response
 // @Failure      500 {object} response.Response
-// @Router       /api/v1/files/upload [post]
+// @Router       /api/v1/files [post]
 func (h *FileHandler) UploadDirect(c *gin.Context) {
 	// 解析表单
 	var req UploadDirectRequest
@@ -196,6 +200,7 @@ func (h *FileHandler) UploadDirect(c *gin.Context) {
 	}
 
 	// 返回响应
+	c.Status(http.StatusCreated)
 	response.Success(c, UploadDirectResponse{
 		FileID:      uploadedFile.ID,
 		Name:        uploadedFile.Name,
@@ -209,14 +214,14 @@ func (h *FileHandler) UploadDirect(c *gin.Context) {
 // InitPresignedUpload godoc
 // @Summary      获取小文件上传预签名 URL
 // @Description  生成预签名 URL 供前端直接上传到 S3
-// @Tags         files
+// @Tags         Presigned Upload
 // @Accept       json
 // @Produce      json
 // @Param        body body InitPresignedUploadRequest true "上传信息"
-// @Success      200 {object} response.Response{data=InitPresignedUploadResponse}
+// @Success      201 {object} response.Response{data=InitPresignedUploadResponse}
 // @Failure      400 {object} response.Response
 // @Failure      500 {object} response.Response
-// @Router       /api/v1/files/upload/presigned [post]
+// @Router       /api/v1/files/presigned [post]
 func (h *FileHandler) InitPresignedUpload(c *gin.Context) {
 	var req InitPresignedUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -237,6 +242,7 @@ func (h *FileHandler) InitPresignedUpload(c *gin.Context) {
 	}
 
 	// 返回响应
+	c.Status(http.StatusCreated)
 	response.Success(c, InitPresignedUploadResponse{
 		FileID:     result.FileID,
 		UploadURL:  result.UploadURL,
@@ -248,29 +254,26 @@ func (h *FileHandler) InitPresignedUpload(c *gin.Context) {
 // ConfirmUpload godoc
 // @Summary      确认前端直传完成
 // @Description  前端上传完成后调用此接口确认
-// @Tags         files
+// @Tags         Presigned Upload
 // @Accept       json
 // @Produce      json
-// @Param        body body ConfirmUploadRequest true "文件 ID"
+// @Param        id path string true "文件 UUID" format(uuid)
 // @Success      200 {object} response.Response{data=ConfirmUploadResponse}
 // @Failure      400 {object} response.Response
+// @Failure      404 {object} response.Response
 // @Failure      500 {object} response.Response
-// @Router       /api/v1/files/upload/confirm [post]
+// @Router       /api/v1/files/{id}/completion [post]
 func (h *FileHandler) ConfirmUpload(c *gin.Context) {
-	var req ConfirmUploadRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("invalid request", err))
-		return
-	}
-
-	// 验证 UUID
-	if req.FileID == uuid.Nil {
-		c.Error(errors.NewBadRequestError("file_id cannot be nil UUID", nil))
+	// 解析 UUID
+	fileIDStr := c.Param("id")
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil || fileID == uuid.Nil {
+		c.Error(errors.NewBadRequestError("invalid or nil UUID", err))
 		return
 	}
 
 	// 调用 Service 层确认上传
-	file, err := h.fileService.ConfirmUpload(c.Request.Context(), req.FileID)
+	file, err := h.fileService.ConfirmUpload(c.Request.Context(), fileID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			c.Error(errors.NewNotFoundError("file not found"))
@@ -290,14 +293,14 @@ func (h *FileHandler) ConfirmUpload(c *gin.Context) {
 // InitMultipartUpload godoc
 // @Summary      初始化大文件分片上传
 // @Description  初始化分片上传，返回 UploadID
-// @Tags         files
+// @Tags         Multipart Upload
 // @Accept       json
 // @Produce      json
 // @Param        body body InitMultipartUploadRequest true "文件信息"
-// @Success      200 {object} response.Response{data=InitMultipartUploadResponse}
+// @Success      201 {object} response.Response{data=InitMultipartUploadResponse}
 // @Failure      400 {object} response.Response
 // @Failure      500 {object} response.Response
-// @Router       /api/v1/files/upload/multipart/init [post]
+// @Router       /api/v1/files/multipart [post]
 func (h *FileHandler) InitMultipartUpload(c *gin.Context) {
 	var req InitMultipartUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -318,6 +321,7 @@ func (h *FileHandler) InitMultipartUpload(c *gin.Context) {
 	}
 
 	// 返回响应
+	c.Status(http.StatusCreated)
 	response.Success(c, InitMultipartUploadResponse{
 		FileID:     result.FileID,
 		UploadID:   result.UploadID,
@@ -328,31 +332,38 @@ func (h *FileHandler) InitMultipartUpload(c *gin.Context) {
 // GeneratePartURL godoc
 // @Summary      生成分片上传预签名 URL
 // @Description  为指定分片生成预签名 URL
-// @Tags         files
+// @Tags         Multipart Upload
 // @Accept       json
 // @Produce      json
+// @Param        id path string true "文件 UUID" format(uuid)
 // @Param        body body GeneratePartURLRequest true "分片信息"
 // @Success      200 {object} response.Response{data=GeneratePartURLResponse}
 // @Failure      400 {object} response.Response
+// @Failure      404 {object} response.Response
 // @Failure      500 {object} response.Response
-// @Router       /api/v1/files/upload/multipart/part-url [post]
+// @Router       /api/v1/files/{id}/multipart/parts [post]
 func (h *FileHandler) GeneratePartURL(c *gin.Context) {
-	var req GeneratePartURLRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("invalid request", err))
+	// 解析 UUID
+	fileIDStr := c.Param("id")
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil || fileID == uuid.Nil {
+		c.Error(errors.NewBadRequestError("invalid or nil UUID", err))
 		return
 	}
 
-	// 验证 UUID
-	if req.FileID == uuid.Nil {
-		c.Error(errors.NewBadRequestError("file_id cannot be nil UUID", nil))
+	// 解析请求体（只需要 part_number）
+	var req struct {
+		PartNumber int `json:"part_number" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid request", err))
 		return
 	}
 
 	// 调用 Service 层生成分片 URL
 	partURL, err := h.fileService.GeneratePartUploadURL(
 		c.Request.Context(),
-		req.FileID,
+		fileID,
 		req.PartNumber,
 	)
 	if err != nil {
@@ -375,24 +386,31 @@ func (h *FileHandler) GeneratePartURL(c *gin.Context) {
 // CompleteMultipartUpload godoc
 // @Summary      完成大文件分片上传
 // @Description  提交所有分片的 ETag，完成上传
-// @Tags         files
+// @Tags         Multipart Upload
 // @Accept       json
 // @Produce      json
+// @Param        id path string true "文件 UUID" format(uuid)
 // @Param        body body CompleteMultipartUploadRequest true "分片列表"
 // @Success      200 {object} response.Response{data=CompleteMultipartUploadResponse}
 // @Failure      400 {object} response.Response
+// @Failure      404 {object} response.Response
 // @Failure      500 {object} response.Response
-// @Router       /api/v1/files/upload/multipart/complete [post]
+// @Router       /api/v1/files/{id}/multipart/completion [post]
 func (h *FileHandler) CompleteMultipartUpload(c *gin.Context) {
-	var req CompleteMultipartUploadRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("invalid request", err))
+	// 解析 UUID
+	fileIDStr := c.Param("id")
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil || fileID == uuid.Nil {
+		c.Error(errors.NewBadRequestError("invalid or nil UUID", err))
 		return
 	}
 
-	// 验证 UUID
-	if req.FileID == uuid.Nil {
-		c.Error(errors.NewBadRequestError("file_id cannot be nil UUID", nil))
+	// 解析请求体（只需要 parts）
+	var req struct {
+		Parts []CompletedPartRequest `json:"parts" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("invalid request", err))
 		return
 	}
 
@@ -408,7 +426,7 @@ func (h *FileHandler) CompleteMultipartUpload(c *gin.Context) {
 	// 调用 Service 层完成分片上传
 	file, err := h.fileService.CompleteMultipartUpload(
 		c.Request.Context(),
-		req.FileID,
+		fileID,
 		parts,
 	)
 	if err != nil {
@@ -430,7 +448,7 @@ func (h *FileHandler) CompleteMultipartUpload(c *gin.Context) {
 // GetDownloadURL godoc
 // @Summary      获取文件下载 URL
 // @Description  生成文件下载预签名 URL
-// @Tags         files
+// @Tags         File Management
 // @Accept       json
 // @Produce      json
 // @Param        id path string true "文件 UUID" format(uuid)
@@ -438,7 +456,7 @@ func (h *FileHandler) CompleteMultipartUpload(c *gin.Context) {
 // @Failure      400 {object} response.Response
 // @Failure      404 {object} response.Response
 // @Failure      500 {object} response.Response
-// @Router       /api/v1/files/{id}/download-url [get]
+// @Router       /api/v1/files/{id}/link [get]
 func (h *FileHandler) GetDownloadURL(c *gin.Context) {
 	// 解析 UUID
 	fileIDStr := c.Param("id")
@@ -474,7 +492,7 @@ func (h *FileHandler) GetDownloadURL(c *gin.Context) {
 // GetFile godoc
 // @Summary      获取文件元数据
 // @Description  根据文件 UUID 获取文件信息
-// @Tags         files
+// @Tags         File Management
 // @Accept       json
 // @Produce      json
 // @Param        id path string true "文件 UUID" format(uuid)
@@ -514,11 +532,11 @@ func (h *FileHandler) GetFile(c *gin.Context) {
 // DeleteFile godoc
 // @Summary      删除文件
 // @Description  删除文件（S3 + 数据库）
-// @Tags         files
+// @Tags         File Management
 // @Accept       json
 // @Produce      json
 // @Param        id path string true "文件 UUID" format(uuid)
-// @Success      200 {object} response.Response{data=DeleteFileResponse}
+// @Success      204 "No Content"
 // @Failure      400 {object} response.Response
 // @Failure      404 {object} response.Response
 // @Failure      500 {object} response.Response
@@ -543,10 +561,64 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 
-	// 返回响应
-	response.Success(c, DeleteFileResponse{
-		FileID:  fileID,
-		Message: "File deleted successfully",
-	})
+	// 返回 204 No Content（无响应体）
+	c.Status(http.StatusNoContent)
+}
+
+// DownloadFile godoc
+// @Summary      直接下载文件
+// @Description  获取文件内容（流式传输）
+// @Tags         File Management
+// @Produce      octet-stream
+// @Param        id path string true "文件 UUID" format(uuid)
+// @Success      200 {file} binary "文件内容"
+// @Failure      400 {object} response.Response
+// @Failure      404 {object} response.Response
+// @Failure      500 {object} response.Response
+// @Router       /api/v1/files/{id}/download [get]
+func (h *FileHandler) DownloadFile(c *gin.Context) {
+	// 解析 UUID
+	fileIDStr := c.Param("id")
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil || fileID == uuid.Nil {
+		c.Error(errors.NewBadRequestError("invalid or nil UUID", err))
+		return
+	}
+
+	// 调用 Service 层下载文件
+	reader, file, err := h.fileService.DownloadFile(c.Request.Context(), fileID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.Error(errors.NewNotFoundError("file not found"))
+		} else if strings.Contains(err.Error(), "not ready") {
+			c.Error(errors.NewBadRequestError("file is not ready for download", err))
+		} else {
+			c.Error(errors.NewInternalError(err))
+		}
+		return
+	}
+	defer reader.Close()
+
+	// 设置 Content-Type
+	c.Header("Content-Type", file.ContentType)
+
+	// 设置 Content-Length
+	c.Header("Content-Length", fmt.Sprintf("%d", file.Size))
+
+	// 根据文件类型决定 Content-Disposition
+	disposition := "attachment"
+	if utils.IsPreviewable(file.ContentType) {
+		disposition = "inline"
+	}
+	c.Header("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, file.Name))
+
+	// 流式传输文件内容
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, reader); err != nil {
+		// 注意：此时已经开始写入响应，无法返回错误响应
+		// 只能记录日志
+		c.Error(errors.NewInternalError(err))
+		return
+	}
 }
 

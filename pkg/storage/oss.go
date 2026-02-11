@@ -162,6 +162,30 @@ func (o *OSSStorage) CompleteMultipartUpload(ctx context.Context, key string, up
 	return nil
 }
 
+// GetObject 获取对象内容（流式读取）
+func (o *OSSStorage) GetObject(ctx context.Context, key string) (io.ReadCloser, string, int64, error) {
+	req := &oss.GetObjectRequest{
+		Bucket: oss.Ptr(o.bucket),
+		Key:    oss.Ptr(key),
+	}
+
+	result, err := o.client.GetObject(ctx, req)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("failed to get object: %w", err)
+	}
+
+	// 提取 Content-Type
+	contentType := "application/octet-stream"
+	if result.ContentType != nil {
+		contentType = *result.ContentType
+	}
+
+	// 提取 Content-Length
+	contentLength := result.ContentLength
+
+	return result.Body, contentType, contentLength, nil
+}
+
 // GeneratePresignedDownloadURL 生成下载预签名 URL
 func (o *OSSStorage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration, opts *PresignOptions) (string, error) {
 	req := &oss.GetObjectRequest{

@@ -27,7 +27,7 @@ echo ""
 
 # 步骤 1: 初始化预签名上传
 echo "2. 初始化预签名上传..."
-INIT_RESPONSE=$(curl -s -X POST "$API_BASE/files/upload/presigned" \
+INIT_RESPONSE=$(curl -s -X POST "$API_BASE/files/presigned" \
   -H "Content-Type: application/json" \
   -d "{
     \"name\": \"test_presigned.txt\",
@@ -83,11 +83,9 @@ echo ""
 
 # 步骤 3: 确认上传完成
 echo "4. 确认上传完成..."
-CONFIRM_RESPONSE=$(curl -s -X POST "$API_BASE/files/upload/confirm" \
+CONFIRM_RESPONSE=$(curl -s -X POST "$API_BASE/files/$FILE_ID/completion" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"file_id\": \"$FILE_ID\"
-  }")
+  -d "{}")
 
 echo "   响应: $(echo "$CONFIRM_RESPONSE" | jq -c .)"
 CONFIRM_STATUS=$(echo "$CONFIRM_RESPONSE" | jq -r '.data.status')
@@ -105,21 +103,37 @@ FILE_INFO=$(curl -s "$API_BASE/files/$FILE_ID")
 echo "   响应: $(echo "$FILE_INFO" | jq -c .)"
 echo ""
 
-# 步骤 5: 获取下载 URL
-echo "6. 获取下载 URL..."
-DOWNLOAD_RESPONSE=$(curl -s "$API_BASE/files/$FILE_ID/download-url")
+# 步骤 6: 获取预签名下载 URL
+echo "6. 获取预签名下载 URL..."
+DOWNLOAD_RESPONSE=$(curl -s "$API_BASE/files/$FILE_ID/link")
 DOWNLOAD_URL=$(echo "$DOWNLOAD_RESPONSE" | jq -r '.data.download_url')
 echo "   下载 URL: $DOWNLOAD_URL"
 echo ""
 
-# 步骤 6: 验证下载
-echo "7. 验证下载..."
+# 步骤 7: 验证预签名 URL 下载
+echo "7. 验证预签名 URL 下载..."
 DOWNLOAD_CONTENT=$(curl -s "$DOWNLOAD_URL")
 if [ -n "$DOWNLOAD_CONTENT" ]; then
-  echo "   ✅ 下载成功"
+  echo "   ✅ 预签名 URL 下载成功"
   echo "   内容预览: ${DOWNLOAD_CONTENT:0:50}..."
 else
   echo "   ❌ 下载失败"
+fi
+echo ""
+
+# 步骤 8: 测试直接下载端点
+echo "8. 测试直接下载端点..."
+DIRECT_DOWNLOAD=$(curl -s -i "$API_BASE/files/$FILE_ID/download")
+HTTP_STATUS=$(echo "$DIRECT_DOWNLOAD" | grep "HTTP/" | awk '{print $2}')
+CONTENT_TYPE=$(echo "$DIRECT_DOWNLOAD" | grep -i "Content-Type:" | cut -d' ' -f2- | tr -d '\r')
+CONTENT_DISPOSITION=$(echo "$DIRECT_DOWNLOAD" | grep -i "Content-Disposition:" | cut -d' ' -f2- | tr -d '\r')
+
+if [ "$HTTP_STATUS" = "200" ]; then
+  echo "   ✅ 直接下载成功 (HTTP 200)"
+  echo "   Content-Type: $CONTENT_TYPE"
+  echo "   Content-Disposition: $CONTENT_DISPOSITION"
+else
+  echo "   ❌ 直接下载失败 (HTTP $HTTP_STATUS)"
 fi
 echo ""
 

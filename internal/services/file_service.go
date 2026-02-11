@@ -37,6 +37,9 @@ type FileService interface {
 	// CompleteMultipartUpload 完成大文件分片上传
 	CompleteMultipartUpload(ctx context.Context, fileID uuid.UUID, parts []storage.CompletedPart) (*models.File, error)
 
+	// DownloadFile 直接下载文件内容（流式传输）
+	DownloadFile(ctx context.Context, fileID uuid.UUID) (io.ReadCloser, *models.File, error)
+
 	// GetDownloadURL 生成下载预签名 URL
 	GetDownloadURL(ctx context.Context, fileID uuid.UUID, expiry time.Duration) (string, error)
 
@@ -322,6 +325,28 @@ func (s *fileService) CompleteMultipartUpload(ctx context.Context, fileID uuid.U
 	}
 
 	return file, nil
+}
+
+// DownloadFile 直接下载文件内容（流式传输）
+func (s *fileService) DownloadFile(ctx context.Context, fileID uuid.UUID) (io.ReadCloser, *models.File, error) {
+	// 查询文件记录
+	file, err := s.fileRepo.GetByID(ctx, fileID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("file not found: %w", err)
+	}
+
+	// 检查文件状态
+	if file.Status != models.FileStatusCompleted {
+		return nil, nil, fmt.Errorf("file is not ready for download")
+	}
+
+	// 从存储获取文件流
+	reader, _, _, err := s.storage.GetObject(ctx, file.StorageKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get file: %w", err)
+	}
+
+	return reader, file, nil
 }
 
 // GetDownloadURL 生成下载预签名 URL

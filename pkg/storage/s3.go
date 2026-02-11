@@ -188,6 +188,31 @@ func (s *S3Storage) CompleteMultipartUpload(ctx context.Context, key string, upl
 	return nil
 }
 
+// GetObject 获取对象内容（流式读取）
+func (s *S3Storage) GetObject(ctx context.Context, key string) (io.ReadCloser, string, int64, error) {
+	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("failed to get object: %w", err)
+	}
+
+	// 提取 Content-Type
+	contentType := "application/octet-stream"
+	if result.ContentType != nil {
+		contentType = *result.ContentType
+	}
+
+	// 提取 Content-Length
+	contentLength := int64(0)
+	if result.ContentLength != nil {
+		contentLength = *result.ContentLength
+	}
+
+	return result.Body, contentType, contentLength, nil
+}
+
 // GeneratePresignedDownloadURL 生成下载预签名 URL
 func (s *S3Storage) GeneratePresignedDownloadURL(ctx context.Context, key string, expiry time.Duration, opts *PresignOptions) (string, error) {
 	presignClient := s3.NewPresignClient(s.client)

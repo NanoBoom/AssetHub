@@ -19,7 +19,7 @@ TEST_FILE_1="/tmp/test_small_$(date +%s).txt"
 echo "Hello, this is a test file for UUID migration!" > "$TEST_FILE_1"
 
 echo "1. 上传文件..."
-UPLOAD_RESPONSE=$(curl -s -X POST "$API_BASE/files/upload" \
+UPLOAD_RESPONSE=$(curl -s -X POST "$API_BASE/files" \
   -F "name=test_small.txt" \
   -F "file=@$TEST_FILE_1")
 
@@ -34,16 +34,33 @@ echo "   $(echo "$FILE_INFO" | jq -c '.data | {file_id, name, size, status}')"
 echo ""
 
 echo "3. 获取下载 URL..."
-DOWNLOAD_RESPONSE=$(curl -s "$API_BASE/files/$FILE_ID_1/download-url")
+DOWNLOAD_RESPONSE=$(curl -s "$API_BASE/files/$FILE_ID_1/link")
 DOWNLOAD_URL=$(echo "$DOWNLOAD_RESPONSE" | jq -r '.data.download_url')
 echo "   ✅ 下载 URL 已生成"
 echo ""
 
-echo "4. 验证下载..."
+echo "4. 验证预签名 URL 下载..."
 CONTENT=$(curl -s "$DOWNLOAD_URL")
 if [ -n "$CONTENT" ]; then
-  echo "   ✅ 下载成功"
+  echo "   ✅ 预签名 URL 下载成功"
   echo "   内容: ${CONTENT:0:50}..."
+fi
+echo ""
+
+echo "5. 测试直接下载端点..."
+DIRECT_DOWNLOAD=$(curl -s -i "$API_BASE/files/$FILE_ID_1/download")
+HTTP_STATUS=$(echo "$DIRECT_DOWNLOAD" | grep "HTTP/" | awk '{print $2}')
+CONTENT_TYPE=$(echo "$DIRECT_DOWNLOAD" | grep -i "Content-Type:" | cut -d' ' -f2- | tr -d '\r')
+CONTENT_DISPOSITION=$(echo "$DIRECT_DOWNLOAD" | grep -i "Content-Disposition:" | cut -d' ' -f2- | tr -d '\r')
+DIRECT_CONTENT=$(echo "$DIRECT_DOWNLOAD" | tail -1)
+
+if [ "$HTTP_STATUS" = "200" ]; then
+  echo "   ✅ 直接下载成功 (HTTP 200)"
+  echo "   Content-Type: $CONTENT_TYPE"
+  echo "   Content-Disposition: $CONTENT_DISPOSITION"
+  echo "   内容: ${DIRECT_CONTENT:0:50}..."
+else
+  echo "   ❌ 直接下载失败 (HTTP $HTTP_STATUS)"
 fi
 echo ""
 
@@ -76,9 +93,12 @@ echo ""
 # 测试 3: 删除文件
 echo "【测试 3】删除文件"
 echo "----------------------------------------"
-DELETE_RESPONSE=$(curl -s -X DELETE "$API_BASE/files/$FILE_ID_1")
-echo "   响应: $(echo "$DELETE_RESPONSE" | jq -c .)"
-echo "   ✅ 文件已删除"
+DELETE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API_BASE/files/$FILE_ID_1")
+if [ "$DELETE_STATUS" = "204" ]; then
+  echo "   ✅ 文件已删除 (HTTP 204 No Content)"
+else
+  echo "   ❌ 删除失败 (HTTP $DELETE_STATUS)"
+fi
 echo ""
 
 # 测试 4: 验证删除后无法访问
